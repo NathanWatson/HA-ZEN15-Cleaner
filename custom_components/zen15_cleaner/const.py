@@ -1,6 +1,11 @@
 DOMAIN = "zen15_cleaner"
 
-CONF_THRESHOLD_KWH = "threshold_kwh"
+# Global forward / backward thresholds
+CONF_FORWARD_THRESHOLD_KWH = "forward_threshold_kwh"
+CONF_BACKWARD_THRESHOLD_KWH = "backward_threshold_kwh"
 
-# Default: ignore any single-step increase larger than this
-DEFAULT_THRESHOLD_KWH = 10.0
+# Per-device forward overrides (text field, one "Name = value" per line)
+CONF_FORWARD_OVERRIDES = "forward_overrides"
+
+DEFAULT_FORWARD_THRESHOLD_KWH = 10.0   # max allowed increase per update
+DEFAULT_BACKWARD_THRESHOLD_KWH = 0.0   # reserved; we still block all decreases

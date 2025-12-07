@@ -5,11 +5,18 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, DEFAULT_THRESHOLD_KWH, CONF_THRESHOLD_KWH
+from .const import (
+    DOMAIN,
+    CONF_FORWARD_THRESHOLD_KWH,
+    CONF_BACKWARD_THRESHOLD_KWH,
+    CONF_FORWARD_OVERRIDES,
+    DEFAULT_FORWARD_THRESHOLD_KWH,
+    DEFAULT_BACKWARD_THRESHOLD_KWH,
+)
 
 
 def _get_default_options(
@@ -17,15 +24,28 @@ def _get_default_options(
 ) -> dict:
     """Return default or existing options."""
     if config_entry is None:
-        # No entry yet: just return defaults
-        return {CONF_THRESHOLD_KWH: DEFAULT_THRESHOLD_KWH}
+        return {
+            CONF_FORWARD_THRESHOLD_KWH: DEFAULT_FORWARD_THRESHOLD_KWH,
+            CONF_BACKWARD_THRESHOLD_KWH: DEFAULT_BACKWARD_THRESHOLD_KWH,
+            CONF_FORWARD_OVERRIDES: "",
+        }
 
-    # Prefer options; fall back to data; then default
+    data = config_entry.data
+    opts = config_entry.options
+
     return {
-        CONF_THRESHOLD_KWH: config_entry.options.get(
-            CONF_THRESHOLD_KWH,
-            config_entry.data.get(CONF_THRESHOLD_KWH, DEFAULT_THRESHOLD_KWH),
-        )
+        CONF_FORWARD_THRESHOLD_KWH: opts.get(
+            CONF_FORWARD_THRESHOLD_KWH,
+            data.get(CONF_FORWARD_THRESHOLD_KWH, DEFAULT_FORWARD_THRESHOLD_KWH),
+        ),
+        CONF_BACKWARD_THRESHOLD_KWH: opts.get(
+            CONF_BACKWARD_THRESHOLD_KWH,
+            data.get(CONF_BACKWARD_THRESHOLD_KWH, DEFAULT_BACKWARD_THRESHOLD_KWH),
+        ),
+        CONF_FORWARD_OVERRIDES: opts.get(
+            CONF_FORWARD_OVERRIDES,
+            data.get(CONF_FORWARD_OVERRIDES, ""),
+        ),
     }
 
 
@@ -34,33 +54,46 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+        """Tell HA that this integration has an options flow."""
+        return Zen15CleanerOptionsFlowHandler(config_entry)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
-        # Only one instance allowed
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
         if user_input is not None:
-            # Store initial threshold in data; options can override later
-            threshold = float(
-                user_input.get(CONF_THRESHOLD_KWH, DEFAULT_THRESHOLD_KWH)
-            )
+            # Save initial thresholds & overrides in data
             return self.async_create_entry(
                 title="ZEN15 Cleaner",
-                data={CONF_THRESHOLD_KWH: threshold},
+                data=user_input,
             )
 
-        # Show initial form with threshold field
-        options = _get_default_options(self.hass, None)
+        defaults = _get_default_options(self.hass, None)
 
         schema = vol.Schema(
             {
                 vol.Optional(
-                    CONF_THRESHOLD_KWH,
-                    default=options[CONF_THRESHOLD_KWH],
-                ): vol.All(cv.positive_float),
+                    CONF_FORWARD_THRESHOLD_KWH,
+                    default=defaults[CONF_FORWARD_THRESHOLD_KWH],
+                ): vol.All(
+                    cv.positive_float
+                ),  # Max allowed increase in kWh per update
+                vol.Optional(
+                    CONF_BACKWARD_THRESHOLD_KWH,
+                    default=defaults[CONF_BACKWARD_THRESHOLD_KWH],
+                ): vol.All(
+                    cv.positive_float
+                ),  # Currently informational; decreases are always ignored
+                vol.Optional(
+                    CONF_FORWARD_OVERRIDES,
+                    default=defaults[CONF_FORWARD_OVERRIDES],
+                ): cv.string,  # Lines like "Fridge = 50"
             }
         )
 
@@ -74,7 +107,6 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle an options flow for ZEN15 Cleaner."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
         self.config_entry = config_entry
 
     async def async_step_init(
@@ -82,17 +114,24 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Manage the options."""
         if user_input is not None:
-            # Save new options; integration will reload via update_listener
             return self.async_create_entry(title="", data=user_input)
 
-        options = _get_default_options(self.hass, self.config_entry)
+        defaults = _get_default_options(self.hass, self.config_entry)
 
         schema = vol.Schema(
             {
                 vol.Optional(
-                    CONF_THRESHOLD_KWH,
-                    default=options[CONF_THRESHOLD_KWH],
+                    CONF_FORWARD_THRESHOLD_KWH,
+                    default=defaults[CONF_FORWARD_THRESHOLD_KWH],
                 ): vol.All(cv.positive_float),
+                vol.Optional(
+                    CONF_BACKWARD_THRESHOLD_KWH,
+                    default=defaults[CONF_BACKWARD_THRESHOLD_KWH],
+                ): vol.All(cv.positive_float),
+                vol.Optional(
+                    CONF_FORWARD_OVERRIDES,
+                    default=defaults[CONF_FORWARD_OVERRIDES],
+                ): cv.string,
             }
         )
 
@@ -100,10 +139,3 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             data_schema=schema,
         )
-
-
-async def async_get_options_flow(
-    config_entry: config_entries.ConfigEntry,
-) -> Zen15CleanerOptionsFlowHandler:
-    """Get the options flow."""
-    return Zen15CleanerOptionsFlowHandler(config_entry)

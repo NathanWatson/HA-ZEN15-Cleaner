@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, Dict, List
 
 from homeassistant.components.sensor import (
     SensorEntity,
@@ -19,14 +19,25 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers import entity_registry as er, device_registry as dr
-from homeassistant.util import slugify
 from homeassistant.config_entries import ConfigEntry
 
 from .const import (
     DOMAIN,
-    DEFAULT_THRESHOLD_KWH,
-    CONF_THRESHOLD_KWH,
+    CONF_FORWARD_THRESHOLD_KWH,
+    CONF_BACKWARD_THRESHOLD_KWH,
+    CONF_FORWARD_OVERRIDES,
+    DEFAULT_FORWARD_THRESHOLD_KWH,
+    DEFAULT_BACKWARD_THRESHOLD_KWH,
 )
+
+
+def _slug(text: str) -> str:
+    return (
+        text.lower()
+        .replace(" ", "_")
+        .replace("/", "_")
+        .replace("-", "_")
+    )
 
 
 @dataclass
@@ -40,6 +51,37 @@ class Zen15EnergySource:
     raw_entity_id: str
 
 
+def _parse_forward_overrides(raw: str) -> Dict[str, float]:
+    """
+    Parse per-device overrides from a text blob.
+
+    Format: one entry per line, e.g.:
+
+        Fridge = 50
+        Washing Machine = 20
+
+    Matching is case-insensitive on DEVICE NAME.
+    """
+    overrides: Dict[str, float] = {}
+    if not raw:
+        return overrides
+
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip().lower()
+        try:
+            overrides[name] = float(value.strip())
+        except (TypeError, ValueError):
+            continue
+
+    return overrides
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -47,13 +89,27 @@ async def async_setup_entry(
 ) -> None:
     """Set up ZEN15 cleaned energy sensors from a config entry."""
 
-    threshold_kwh = float(
-        entry.options.get(
-            CONF_THRESHOLD_KWH,
-            entry.data.get(CONF_THRESHOLD_KWH, DEFAULT_THRESHOLD_KWH),
+    data = entry.data
+    opts = entry.options
+
+    global_forward = float(
+        opts.get(
+            CONF_FORWARD_THRESHOLD_KWH,
+            data.get(CONF_FORWARD_THRESHOLD_KWH, DEFAULT_FORWARD_THRESHOLD_KWH),
+        )
+    )
+    global_backward = float(
+        opts.get(
+            CONF_BACKWARD_THRESHOLD_KWH,
+            data.get(CONF_BACKWARD_THRESHOLD_KWH, DEFAULT_BACKWARD_THRESHOLD_KWH),
         )
     )
 
+    overrides_raw = opts.get(
+        CONF_FORWARD_OVERRIDES,
+        data.get(CONF_FORWARD_OVERRIDES, ""),
+    )
+    forward_overrides = _parse_forward_overrides(overrides_raw)
 
     entity_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
@@ -73,7 +129,11 @@ async def async_setup_entry(
 
         # Find candidate sensor entities for this device
         candidates: list[str] = []
-        for ent in er.async_entries_for_device(entity_reg, device.id, include_disabled_entities=False):
+        for ent in er.async_entries_for_device(
+            entity_reg,
+            device.id,
+            include_disabled_entities=False,
+        ):
             if ent.domain != "sensor":
                 continue
             candidates.append(ent.entity_id)
@@ -96,10 +156,13 @@ async def async_setup_entry(
 
     for src in zen15_sources:
         base_name = src.device_name or src.raw_entity_id.split(".")[-1]
-        slug = slugify(base_name or src.raw_entity_id)
+        key = (base_name or "").strip().lower()
+        forward = forward_overrides.get(key, global_forward)
+        backward = global_backward
 
+        slug = _slug(base_name or src.raw_entity_id)
         name = f"{base_name} Energy Filtered"
-        unique_id = f"{src.device_id}_energy_filtered"
+        unique_id = f"{src.device_id}_energy_filtered_{slug}"
 
         entities.append(
             Zen15CleanedEnergySensor(
@@ -107,8 +170,8 @@ async def async_setup_entry(
                 source=src,
                 name=name,
                 unique_id=unique_id,
-                slug=slug,
-                threshold_kwh=threshold_kwh,
+                forward_threshold_kwh=forward,
+                backward_threshold_kwh=backward,
             )
         )
 
@@ -116,7 +179,10 @@ async def async_setup_entry(
         async_add_entities(entities)
 
 
-async def _find_energy_entity_for_device(hass: HomeAssistant, entity_ids: list[str]) -> str | None:
+async def _find_energy_entity_for_device(
+    hass: HomeAssistant,
+    entity_ids: list[str],
+) -> str | None:
     """Pick the best candidate raw kWh energy sensor among entity_ids."""
     best_candidate: str | None = None
 
@@ -161,20 +227,20 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         source: Zen15EnergySource,
         name: str,
         unique_id: str,
-        slug: str,
-        threshold_kwh: float,
+        forward_threshold_kwh: float,
+        backward_threshold_kwh: float,
     ) -> None:
         self.hass = hass
         self._source = source
         self._attr_name = name
         self._attr_unique_id = unique_id
-        self._slug = slug
-        self._threshold_kwh = float(threshold_kwh)
+
+        self._forward_threshold_kwh = float(forward_threshold_kwh)
+        self._backward_threshold_kwh = float(backward_threshold_kwh)
 
         self._raw_entity_id = source.raw_entity_id
         self._native_value: float | None = None
         self._last_good_value: float | None = None
-        self._spike_ignored_count: int = 0
         self._unsub_state = None
 
         self._attr_device_info = DeviceInfo(
@@ -193,15 +259,14 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         return {
             "raw_entity_id": self._raw_entity_id,
             "last_good_value": self._last_good_value,
-            "threshold_kwh": self._threshold_kwh,
-            "spike_ignored_count": self._spike_ignored_count,
+            "forward_threshold_kwh": self._forward_threshold_kwh,
+            "backward_threshold_kwh": self._backward_threshold_kwh,
         }
 
     async def async_added_to_hass(self) -> None:
         """Handle entity being added to Home Assistant."""
         await super().async_added_to_hass()
 
-        # Restore last state
         last_state = await self.async_get_last_state()
         if last_state and last_state.state not in (
             STATE_UNAVAILABLE,
@@ -216,16 +281,6 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
             except (TypeError, ValueError):
                 pass
 
-            # Restore spike count if present
-            if "spike_ignored_count" in last_state.attributes:
-                try:
-                    self._spike_ignored_count = int(
-                        last_state.attributes["spike_ignored_count"]
-                    )
-                except (TypeError, ValueError):
-                    self._spike_ignored_count = 0
-
-        # Also try current raw state once at startup
         self._apply_raw_state(self.hass.states.get(self._raw_entity_id))
 
         @callback
@@ -233,7 +288,6 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
             new_state = event.data.get("new_state")
             self._apply_raw_state(new_state)
 
-        # Subscribe to raw entity state changes
         self._unsub_state = async_track_state_change_event(
             self.hass,
             [self._raw_entity_id],
@@ -249,7 +303,12 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
     @callback
     def _apply_raw_state(self, state) -> None:
         """Apply logic to a new raw state."""
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN, None, ""):
+        if state is None or state.state in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+            None,
+            "",
+        ):
             return
 
         try:
@@ -265,17 +324,19 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
             return
 
         last = self._last_good_value
+        delta = raw_value - last
 
-        # Downward jump: treat as glitch/reset, ignore
-        if raw_value < last:
-            self._spike_ignored_count += 1
-            self.async_write_ha_state()
+        # ----- Backward jumps -----
+        # To keep HA statistics happy (total_increasing), we NEVER decrease
+        # the filtered value. Any negative delta is treated as a glitch/reset.
+        if delta < 0:
+            # backward_threshold_kwh is currently informational only; we still
+            # clamp to last_good_value so the sensor never goes down.
             return
 
-        # Huge forward jump
-        if (raw_value - last) > self._threshold_kwh:
-            self._spike_ignored_count += 1
-            self.async_write_ha_state()
+        # ----- Forward spikes -----
+        if delta > self._forward_threshold_kwh:
+            # Ignore huge jump
             return
 
         # Normal update
