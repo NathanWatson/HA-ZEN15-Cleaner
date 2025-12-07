@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange)](https://hacs.xyz/)
-  ![Manifest Badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FNathanWatson%2FHA-ZEN15-Cleaner%2Frefs%2Fheads%2Fmain%2Fcustom_components%2Fzen15_cleaner%2Fmanifest.json&query=version&label=Manifest)
-  [![release][releasebadge]][releaselink]
-  ![HA 2024.12+](https://img.shields.io/badge/Home%20Assistant-2024.12%2B-brightgreen)
+  <a href="https://hacs.xyz/"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS Custom"></a>
+  <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FNathanWatson%2FHA-ZEN15-Cleaner%2Frefs%2Fheads%2Fmain%2Fcustom_components%2Fzen15_cleaner%2Fmanifest.json&query=version&label=Manifest" alt="Manifest badge">
+  <a href="https://github.com/NathanWatson/HA-ZEN15-Cleaner/releases"><img src="https://img.shields.io/github/v/release/NathanWatson/HA-ZEN15-Cleaner?logo=github&color=8A2BE2" alt="Release Badge"></a>
+  <img src="https://img.shields.io/badge/Home%20Assistant-2024.12%2B-brightgreen.svg" alt="HA 2024.12+">
 </p>
 
 # 🔌 ZEN15 Cleaner – A Home Assistant Spike-Filtering Integration
@@ -98,7 +98,3 @@ entities:
 
 - If a device does not appear in the options:
   - Ensure the device manufacturer is **ZOOZ** and the model string contains **ZEN15**.
-
-
-[releaselink]: https://github.com/NathanWatson/HA-ZEN15-Cleaner/releases
-[releasebadge]: https://img.shields.io/github/v/release/NathanWatson/HA-ZEN15-Cleaner?logo=github&color=8A2BE2
