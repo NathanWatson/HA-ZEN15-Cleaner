@@ -1,5 +1,9 @@
 {
-    "name": "ZEN15 Cleaner",
-    "homeassistant": "2025.2.4",
-    "hacs": "2.0.5"
+  "name": "ZEN15 Cleaner",
+  "content_in_root": false,
+  "domains": [
+    "sensor"
+  ],
+  "homeassistant": "2024.12.0",
+  "country": "US"
 }

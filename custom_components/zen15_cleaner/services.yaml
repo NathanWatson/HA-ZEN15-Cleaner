@@ -1,0 +1,6 @@
+reset_filtered:
+  name: Reset filtered ZEN15 energy
+  description: Align a ZEN15 Cleaner filtered sensor with the current raw kWh sensor value.
+  target:
+    entity:
+      domain: sensor
