@@ -3,21 +3,20 @@
 </p>
 
 <p align="center">
-  <a href="https://hacs.xyz/">
-    <img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS Custom">
-  </a>
-  <img src="https://img.shields.io/badge/Version-0.7.0-blue.svg" alt="Version 0.7.0">
-  <img src="https://img.shields.io/badge/Home%20Assistant-2024.12%2B-brightgreen.svg" alt="HA 2024.12+">
+  [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange)](https://hacs.xyz/)
+  ![Manifest Badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FNathanWatson%2FHA-ZEN15-Cleaner%2Frefs%2Fheads%2Fmain%2Fcustom_components%2Fzen15_cleaner%2Fmanifest.json&query=version&label=Manifest)
+  [![release][releasebadge]][releaselink]
+  ![HA 2024.12+](https://img.shields.io/badge/Home%20Assistant-2024.12%2B-brightgreen)
 </p>
 
 # 🔌 ZEN15 Cleaner – A Home Assistant Spike-Filtering Integration
 
-ZEN15 Cleaner is a Home Assistant custom integration that fixes noisy, spike-prone energy readings from Zooz ZEN15 Power Switches.  
+ZEN15 Cleaner is a Home Assistant custom integration that fixes noisy, spike-prone energy readings from ZOOZ ZEN15 Power Switches.  
 It keeps your Energy Dashboard clean by filtering out bogus kWh spikes while leaving valid consumption data intact.
 
 ## 🚀 Features
 
-- Filters unrealistic kWh spikes from Zooz ZEN15 plugs  
+- Filters unrealistic kWh spikes from ZOOZ ZEN15 plugs  
 - Per-device spike thresholds with a global default  
 - Home Assistant native config flow + options flow  
 - `sensor.reset_filtered` service to realign filtered values  
@@ -98,4 +97,8 @@ entities:
   - Increase the per-device forward threshold in the options UI.  
 
 - If a device does not appear in the options:
-  - Ensure the device manufacturer is **Zooz** and the model string contains **ZEN15**.
+  - Ensure the device manufacturer is **ZOOZ** and the model string contains **ZEN15**.
+
+
+[releaselink]: https://github.com/NathanWatson/HA-ZEN15-Cleaner/releases
+[releasebadge]: https://img.shields.io/github/v/release/NathanWatson/HA-ZEN15-Cleaner?logo=github&color=8A2BE2
