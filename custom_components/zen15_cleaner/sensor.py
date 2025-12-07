@@ -47,7 +47,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up ZEN15 cleaned energy sensors from a config entry."""
 
-    threshold_kwh = float(entry.options.get(CONF_THRESHOLD_KWH, DEFAULT_THRESHOLD_KWH))
+    threshold_kwh = float(
+        entry.options.get(
+            CONF_THRESHOLD_KWH,
+            entry.data.get(CONF_THRESHOLD_KWH, DEFAULT_THRESHOLD_KWH),
+        )
+    )
+
 
     entity_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
