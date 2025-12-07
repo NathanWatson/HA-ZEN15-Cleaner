@@ -19,7 +19,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers import entity_registry as er, device_registry as dr
-from homeassistant.util.slugify import slugify
+from homeassistant.util import slugify
 from homeassistant.config_entries import ConfigEntry
 
 from .const import (

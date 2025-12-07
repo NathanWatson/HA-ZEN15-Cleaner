@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers import entity_registry as er, device_registry as dr
-from homeassistant.util.slugify import slugify
+from homeassistant.util import slugify
 from homeassistant.config_entries import ConfigEntry
 
 from .const import (
@@ -93,9 +93,9 @@ async def async_setup_entry(
 
     for src in zen15_sources:
         base_name = src.device_name or src.raw_entity_id.split(".")[-1]
-        slug = slugify(base_name or src.raw_entity_id)
 
         name = f"{base_name} Energy Spike"
+        # Stable unique_id: one spike entity per ZEN15 device
         unique_id = f"{src.device_id}_energy_spike"
 
         entities.append(
