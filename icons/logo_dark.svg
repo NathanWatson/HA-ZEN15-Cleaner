@@ -1,0 +1,8 @@
+<svg width="1024" height="512" viewBox="0 0 1024 512" xmlns="http://www.w3.org/2000/svg">
+<rect width="1024" height="512" rx="64" fill="#141419"/>
+<path d="M160 320 L280 220 L400 320 L520 200 L640 280 L760 240 L880 280 L944 256" stroke="#FFFFFF" stroke-width="18" fill="none"/>
+<rect x="260" y="120" width="96" height="144" rx="18" stroke="#FFFFFF" stroke-width="14" fill="none"/>
+<line x1="280" y1="138" x2="280" y2="176" stroke="#FFFFFF" stroke-width="12"/>
+<line x1="336" y1="138" x2="336" y2="176" stroke="#FFFFFF" stroke-width="12"/>
+<text x="420" y="180" font-family="Arial" font-size="64" fill="#FFFFFF">ZEN15 Cleaner</text>
+</svg>

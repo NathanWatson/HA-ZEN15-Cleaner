@@ -1,93 +1,101 @@
-# ZEN15 Cleaner – Home Assistant Custom Integration
+<p align="center">
+  <img src="logo.png" alt="ZEN15 Cleaner Logo" width="600">
+</p>
 
-**Problem:** Zooz ZEN15 plugs occasionally report bogus energy values  
-(e.g. huge kWh jumps or resets to 0). Home Assistant's statistics engine
-treats those as real consumption, which blows up the Energy Dashboard and
-Sankey graphs.
+<p align="center">
+  <a href="https://hacs.xyz/">
+    <img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS Custom">
+  </a>
+  <img src="https://img.shields.io/badge/Version-0.7.0-blue.svg" alt="Version 0.7.0">
+  <img src="https://img.shields.io/badge/Home%20Assistant-2024.12%2B-brightgreen.svg" alt="HA 2024.12+">
+</p>
 
-**Solution:** `zen15_cleaner` auto-discovers all ZEN15 devices and exposes
-clean, filtered energy sensors that:
+# 🔌 ZEN15 Cleaner – A Home Assistant Spike-Filtering Integration
 
-- Never go *backwards* (ignore resets / glitches)
-- Ignore single-step jumps larger than a configurable kWh threshold
-- Are marked correctly as `energy` / `total_increasing` for Energy Dashboard
+ZEN15 Cleaner is a Home Assistant custom integration that fixes noisy, spike-prone energy readings from Zooz ZEN15 Power Switches.  
+It keeps your Energy Dashboard clean by filtering out bogus kWh spikes while leaving valid consumption data intact.
 
-You then point your Energy Dashboard and energy cards at the **filtered**
-sensors instead of the raw ZEN15 kWh sensors.
+## 🚀 Features
 
----
+- Filters unrealistic kWh spikes from Zooz ZEN15 plugs  
+- Per-device spike thresholds with a global default  
+- Home Assistant native config flow + options flow  
+- `sensor.reset_filtered` service to realign filtered values  
+- Energy Dashboard safe (`device_class: energy`, `state_class: total_increasing`)  
+- Diagnostic attributes to help tune thresholds and debug behavior  
 
-## Features
+## 📦 Installation
 
-- 🔍 **Auto-discovery**  
-  Finds all devices with `manufacturer = "Zooz"` and `model` containing `ZEN15`
-  using the Home Assistant device registry.
-
-- ⚡ **Filtered energy sensor per ZEN15**  
-  For each plug, creates `<Device Name> Energy Filtered` that:
-  - Listens to the raw kWh entity (e.g. `sensor.fridge_electric_consumption_kwh`)
-  - Ignores:
-    - Downward jumps (resets / glitches)
-    - Single-step increases larger than `threshold_kwh` (default: `10.0`)
-  - Reports:
-    - `device_class: energy`
-    - `state_class: total_increasing`
-    - `unit_of_measurement: kWh`
-
-- 🚨 **Spike detection binary sensor**  
-  Per ZEN15, creates `<Device Name> Energy Spike`:
-  - `on` if any spikes have been detected and ignored
-  - `problem` device class
-  - Tracks `spike_ignored_count` as an attribute (for automations / debugging)
-
-- ⚙️ **Configurable threshold (UI options)**  
-  Change the global `threshold_kwh` (max allowed per-update kWh jump) via
-  the integration’s **Options** flow.
-
-- 💾 **State restore**  
-  Filtered sensors and spike counters restore state across restarts using
-  Home Assistant’s `RestoreEntity`.
-
----
-
-## How It Works
-
-1. The integration scans the **device registry** for devices where:
-   - `manufacturer == "Zooz"`
-   - `"ZEN15"` appears in the `model`
-
-2. For each ZEN15 device, it looks at sensors attached to that device and
-   picks the one that looks like a cumulative kWh sensor:
-   - `device_class == energy`
-   - `unit_of_measurement` in `kWh`
-   - Prefer `state_class == total_increasing`
-
-3. It then creates:
-   - `Sensor`: `<Device Name> Energy Filtered`
-   - `Binary sensor`: `<Device Name> Energy Spike`
-
-4. The filtered sensor listens to the raw kWh value:
-
-   - If value is *lower* than the last good value  
-     → spike ignored, counter incremented, value not updated.
-
-   - If value jumps up by more than `threshold_kwh` in one step  
-     → spike ignored, counter incremented, value not updated.
-
-   - Otherwise  
-     → normal update, stored as the new last good value.
-
-5. The Spike binary sensor uses similar logic but only:
-   - Tracks whether spikes happened (`on` / `off`)
-   - Tracks how many (`spike_ignored_count`)
-
----
-
-## Installation
-
-1. Locate your Home Assistant config directory (same place as `configuration.yaml`).
-
-2. Inside it, create the custom components folder if it doesn’t exist:
+1. Copy this repository into your Home Assistant configuration directory under:
 
    ```text
-   custom_components/
+   custom_components/zen15_cleaner/
+   ```
+
+2. Restart Home Assistant.
+3. Go to **Settings → Devices & Services → Add Integration** and search for **ZEN15 Cleaner**.
+
+## 🔧 Configuration
+
+During initial setup and later via **Configure**, you can:
+
+- Set a **global forward threshold** (max allowed kWh increase per update).  
+- Set a **global backward threshold** (informational; decreases are always blocked).  
+- Set **per-device thresholds** for each ZEN15 (Fridge, Dishwasher, Furnace, etc.).
+
+## ⚙️ Filtering Logic
+
+Let:
+
+- `raw` = raw ZEN15 kWh sensor value  
+- `filtered` = value from ZEN15 Cleaner  
+- `delta = raw - last_good_value`  
+
+Rules:
+
+- If `delta < 0` → ignored (never decrease filtered energy).  
+- If `delta > threshold_kwh` → ignored (treated as a spike).  
+- Otherwise → accepted and `filtered` is updated.
+
+## 🧪 Reset Filtered Service
+
+If a ZEN15 resets or you need to re-sync:
+
+```yaml
+service: sensor.reset_filtered
+target:
+  entity_id: sensor.fridge_energy_filtered
+```
+
+This aligns the filtered value with the current raw kWh reading while preserving Energy Dashboard statistics.
+
+## 📊 Attributes
+
+Each `*_energy_filtered` sensor exposes:
+
+- `raw_entity_id`  
+- `last_good_value`  
+- `last_delta_kwh`  
+- `forward_threshold_kwh`  
+- `backward_threshold_kwh`  
+
+## 📝 Example Lovelace Card
+
+```yaml
+type: entities
+title: Cleaned ZEN15 Sensors
+entities:
+  - sensor.fridge_energy_filtered
+  - sensor.dishwasher_energy_filtered
+  - sensor.washing_machine_energy_filtered
+  - sensor.furnace_energy_filtered
+```
+
+## 🐛 Troubleshooting
+
+- If a filtered sensor remains flat:
+  - Check `last_delta_kwh` in the attributes.
+  - Increase the per-device forward threshold in the options UI.  
+
+- If a device does not appear in the options:
+  - Ensure the device manufacturer is **Zooz** and the model string contains **ZEN15**.
