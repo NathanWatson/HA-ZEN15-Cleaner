@@ -7,6 +7,7 @@ from .const import DOMAIN
 
 PLATFORMS = ["sensor"]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up via YAML (unused)."""
