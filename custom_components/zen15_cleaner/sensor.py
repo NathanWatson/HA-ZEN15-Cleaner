@@ -219,7 +219,7 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         unique_id: str,
         forward_threshold_kwh: float,
         backward_threshold_kwh: float,
-        reject_run_limit: int = REJECT_RUN_LIMIT_DEFAULT,
+        reject_run_limit: int = DEFAULT_REJECT_RUN_LIMIT,
     ) -> None:
         self.hass = hass
         self._source = source
