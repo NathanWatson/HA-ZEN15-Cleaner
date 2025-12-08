@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="ZEN15 Cleaner Logo" width="600">
+  <img src="https://raw.githubusercontent.com/NathanWatson/HA-ZEN15-Cleaner/main/icons/logo_dark.png" alt="ZEN15 Cleaner Logo" width="600">
 </p>
 
 <p align="center">
