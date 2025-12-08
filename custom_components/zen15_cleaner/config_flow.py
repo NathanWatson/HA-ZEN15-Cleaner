@@ -26,6 +26,10 @@ def _is_zen15_device(device: dr.DeviceEntry) -> bool:
     model = (device.model or "").strip().lower()
     return manufacturer == "zooz" and "zen15" in model
 
+def _zen15_label(device: dr.DeviceEntry) -> str:
+    """Human-readable label for options form."""
+    base = device.name_by_user or device.name or "ZEN15"
+    return f"{base} ({device.id})"
 
 class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for ZEN15 Cleaner."""
@@ -130,14 +134,16 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
             per_device_new: Dict[str, float] = {}
 
             for device in zen15_devices:
-                key = device.id  # we use the raw device_id as the option key
-                if key in user_input:
+                label = _zen15_label(device)
+                dev_id = device.id
+
+                if label in user_input:
                     try:
-                        per_device_new[key] = float(user_input[key])
+                        per_device_new[dev_id] = float(user_input[label])
                     except (TypeError, ValueError):
                         # If invalid, just keep previous value (if any)
-                        if key in per_device_existing:
-                            per_device_new[key] = per_device_existing[key]
+                        if dev_id in per_device_existing:
+                            per_device_new[dev_id] = per_device_existing[dev_id]
 
             # Create options entry; HA replaces options with this dict
             return self.async_create_entry(
@@ -175,11 +181,13 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
         # One numeric field per ZEN15 device, keyed by device_id
         # The label shown will be the device_id; value is the forward-threshold override.
         for device in zen15_devices:
-            key = device.id
-            default = per_device_existing.get(key, forward_default)
+            label = _zen15_label(device)
+            dev_id = device.id
+            default = per_device_existing.get(dev_id, forward_default)
+
             fields[
                 vol.Optional(
-                    key,
+                    label,
                     default=default,
                 )
             ] = vol.Coerce(float)
