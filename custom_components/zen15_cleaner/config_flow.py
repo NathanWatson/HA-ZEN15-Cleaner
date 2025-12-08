@@ -130,3 +130,64 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
             per_device_new: Dict[str, float] = {}
 
             for device in zen15_devices:
+                key = device.id  # we use the raw device_id as the option key
+                if key in user_input:
+                    try:
+                        per_device_new[key] = float(user_input[key])
+                    except (TypeError, ValueError):
+                        # If invalid, just keep previous value (if any)
+                        if key in per_device_existing:
+                            per_device_new[key] = per_device_existing[key]
+
+            # Create options entry; HA replaces options with this dict
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_FORWARD_THRESHOLD_KWH: user_input.get(
+                        CONF_FORWARD_THRESHOLD_KWH, forward_default
+                    ),
+                    CONF_BACKWARD_THRESHOLD_KWH: user_input.get(
+                        CONF_BACKWARD_THRESHOLD_KWH, backward_default
+                    ),
+                    CONF_REJECT_RUN_LIMIT: user_input.get(
+                        CONF_REJECT_RUN_LIMIT, reject_default
+                    ),
+                    CONF_PER_DEVICE_THRESHOLDS: per_device_new,
+                },
+            )
+
+        # ---- Build the dynamic schema (global + per-device fields) ----
+        fields: Dict[Any, Any] = {
+            vol.Optional(
+                CONF_FORWARD_THRESHOLD_KWH,
+                default=forward_default,
+            ): vol.Coerce(float),
+            vol.Optional(
+                CONF_BACKWARD_THRESHOLD_KWH,
+                default=backward_default,
+            ): vol.Coerce(float),
+            vol.Optional(
+                CONF_REJECT_RUN_LIMIT,
+                default=reject_default,
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+        }
+
+        # One numeric field per ZEN15 device, keyed by device_id
+        # The label shown will be the device_id; value is the forward-threshold override.
+        for device in zen15_devices:
+            key = device.id
+            default = per_device_existing.get(key, forward_default)
+            fields[
+                vol.Optional(
+                    key,
+                    default=default,
+                )
+            ] = vol.Coerce(float)
+
+        data_schema = vol.Schema(fields)
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=data_schema,
+            errors=errors,
+        )
