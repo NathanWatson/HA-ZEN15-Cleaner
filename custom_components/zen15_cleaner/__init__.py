@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 
@@ -9,8 +10,9 @@ PLATFORMS = ["sensor"]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up via YAML (unused)."""
+    """Set up via YAML (unused, config-entry only)."""
     return True
 
 
