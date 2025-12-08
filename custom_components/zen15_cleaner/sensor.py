@@ -29,8 +29,9 @@ from .const import (
     CONF_PER_DEVICE_THRESHOLDS,
     DEFAULT_FORWARD_THRESHOLD_KWH,
     DEFAULT_BACKWARD_THRESHOLD_KWH,
+    CONF_REJECT_RUN_LIMIT,
+    DEFAULT_REJECT_RUN_LIMIT,
 )
-REJECT_RUN_LIMIT_DEFAULT = 12  # e.g. 12 consecutive rejections ≈ 1 hour at 5-min updates
 
 
 def _slug(text: str) -> str:
@@ -73,6 +74,12 @@ async def async_setup_entry(
         opts.get(
             CONF_BACKWARD_THRESHOLD_KWH,
             data.get(CONF_BACKWARD_THRESHOLD_KWH, DEFAULT_BACKWARD_THRESHOLD_KWH),
+        )
+    )
+    global_reject_run_limit = int(
+        opts.get(
+            CONF_REJECT_RUN_LIMIT,
+            data.get(CONF_REJECT_RUN_LIMIT, DEFAULT_REJECT_RUN_LIMIT),
         )
     )
 
@@ -142,6 +149,7 @@ async def async_setup_entry(
                 unique_id=unique_id,
                 forward_threshold_kwh=forward,
                 backward_threshold_kwh=backward,
+                reject_run_limit=global_reject_run_limit,
             )
         )
 

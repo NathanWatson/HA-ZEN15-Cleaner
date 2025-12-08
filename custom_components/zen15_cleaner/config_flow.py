@@ -15,8 +15,10 @@ from .const import (
     CONF_FORWARD_THRESHOLD_KWH,
     CONF_BACKWARD_THRESHOLD_KWH,
     CONF_PER_DEVICE_THRESHOLDS,
+    CONF_REJECT_RUN_LIMIT,
     DEFAULT_FORWARD_THRESHOLD_KWH,
     DEFAULT_BACKWARD_THRESHOLD_KWH,
+    DEFAULT_REJECT_RUN_LIMIT,
 )
 
 
@@ -116,6 +118,9 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         DEFAULT_BACKWARD_THRESHOLD_KWH,
                     )
                 ),
+                CONF_REJECT_RUN_LIMIT: user_input.get(
+                    CONF_REJECT_RUN_LIMIT, DEFAULT_REJECT_RUN_LIMIT
+                ),
                 CONF_PER_DEVICE_THRESHOLDS: per_device,
             }
 
@@ -146,6 +151,13 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         ] = vol.All(cv.positive_float)
 
+        schema_dict[
+            vol.Optional(
+                CONF_REJECT_RUN_LIMIT,
+                default=DEFAULT_REJECT_RUN_LIMIT,
+            )
+        ] = vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+
         # Per-device thresholds
         per_device_defaults: Dict[str, float] = defaults[CONF_PER_DEVICE_THRESHOLDS]
 
@@ -166,80 +178,93 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
-    """Options flow (after install)."""
-
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self.config_entry = config_entry
-        self._device_field_map: Dict[str, str] = {}
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Configure options."""
+    async def async_step_init(self, user_input=None):
+        return await self.async_step_user(user_input)
+
+    async def async_step_user(self, user_input=None):
+        errors = {}
+        entry = self.config_entry
+
         if user_input is not None:
-            per_device: Dict[str, float] = {}
-            field_map: Dict[str, str] = self._device_field_map
-
-            for field_key, value in list(user_input.items()):
-                if field_key in field_map:
-                    try:
-                        per_device[field_map[field_key]] = float(value)
-                    except (TypeError, ValueError):
-                        continue
-
-            opts = {
-                CONF_FORWARD_THRESHOLD_KWH: float(
-                    user_input.get(
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_FORWARD_THRESHOLD_KWH: user_input.get(
                         CONF_FORWARD_THRESHOLD_KWH,
-                        DEFAULT_FORWARD_THRESHOLD_KWH,
-                    )
-                ),
-                CONF_BACKWARD_THRESHOLD_KWH: float(
-                    user_input.get(
+                        entry.options.get(
+                            CONF_FORWARD_THRESHOLD_KWH,
+                            entry.data.get(
+                                CONF_FORWARD_THRESHOLD_KWH,
+                                DEFAULT_FORWARD_THRESHOLD_KWH,
+                            ),
+                        ),
+                    ),
+                    CONF_BACKWARD_THRESHOLD_KWH: user_input.get(
                         CONF_BACKWARD_THRESHOLD_KWH,
-                        DEFAULT_BACKWARD_THRESHOLD_KWH,
-                    )
-                ),
-                CONF_PER_DEVICE_THRESHOLDS: per_device,
+                        entry.options.get(
+                            CONF_BACKWARD_THRESHOLD_KWH,
+                            entry.data.get(
+                                CONF_BACKWARD_THRESHOLD_KWH,
+                                DEFAULT_BACKWARD_THRESHOLD_KWH,
+                            ),
+                        ),
+                    ),
+                    CONF_REJECT_RUN_LIMIT: user_input.get(
+                        CONF_REJECT_RUN_LIMIT,
+                        entry.options.get(
+                            CONF_REJECT_RUN_LIMIT,
+                            entry.data.get(
+                                CONF_REJECT_RUN_LIMIT,
+                                DEFAULT_REJECT_RUN_LIMIT,
+                            ),
+                        ),
+                    ),
+                    # keep any per-device stuff if you already have it in options
+                    CONF_PER_DEVICE_THRESHOLDS: entry.options.get(
+                        CONF_PER_DEVICE_THRESHOLDS,
+                        entry.data.get(CONF_PER_DEVICE_THRESHOLDS, {}),
+                    ),
+                },
+            )
+
+        # defaults for the form
+        forward_default = entry.options.get(
+            CONF_FORWARD_THRESHOLD_KWH,
+            entry.data.get(CONF_FORWARD_THRESHOLD_KWH, DEFAULT_FORWARD_THRESHOLD_KWH),
+        )
+        backward_default = entry.options.get(
+            CONF_BACKWARD_THRESHOLD_KWH,
+            entry.data.get(
+                CONF_BACKWARD_THRESHOLD_KWH, DEFAULT_BACKWARD_THRESHOLD_KWH
+            ),
+        )
+        reject_default = entry.options.get(
+            CONF_REJECT_RUN_LIMIT,
+            entry.data.get(CONF_REJECT_RUN_LIMIT, DEFAULT_REJECT_RUN_LIMIT),
+        )
+
+        data_schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_FORWARD_THRESHOLD_KWH,
+                    default=forward_default,
+                ): vol.Coerce(float),
+                vol.Optional(
+                    CONF_BACKWARD_THRESHOLD_KWH,
+                    default=backward_default,
+                ): vol.Coerce(float),
+                vol.Optional(
+                    CONF_REJECT_RUN_LIMIT,
+                    default=reject_default,
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
             }
-
-            return self.async_create_entry(title="", data=opts)
-
-        defaults = _get_default_options(self.hass, self.config_entry)
-        devices = _find_zen15_devices(self.hass)
-
-        self._device_field_map = {}
-        schema_dict: Dict[Any, Any] = {}
-
-        # Global thresholds
-        schema_dict[
-            vol.Optional(
-                CONF_FORWARD_THRESHOLD_KWH,
-                default=defaults[CONF_FORWARD_THRESHOLD_KWH],
-            )
-        ] = vol.All(cv.positive_float)
-
-        schema_dict[
-            vol.Optional(
-                CONF_BACKWARD_THRESHOLD_KWH,
-                default=defaults[CONF_BACKWARD_THRESHOLD_KWH],
-            )
-        ] = vol.All(cv.positive_float)
-
-        # Per-device thresholds
-        per_device_defaults: Dict[str, float] = defaults[CONF_PER_DEVICE_THRESHOLDS]
-
-        for dev, display_name in devices:
-            field_key = f"{display_name} threshold_kwh"
-            self._device_field_map[field_key] = dev.id
-            default_val = per_device_defaults.get(
-                dev.id, defaults[CONF_FORWARD_THRESHOLD_KWH]
-            )
-            schema_dict[
-                vol.Optional(field_key, default=default_val)
-            ] = vol.All(cv.positive_float)
+        )
 
         return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(schema_dict),
+            step_id="user",
+            data_schema=data_schema,
+            errors=errors,
         )
