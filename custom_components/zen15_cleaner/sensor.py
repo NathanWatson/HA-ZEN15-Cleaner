@@ -30,7 +30,7 @@ from .const import (
     DEFAULT_FORWARD_THRESHOLD_KWH,
     DEFAULT_BACKWARD_THRESHOLD_KWH,
 )
-REJECT_RUN_LIMIT_DEFAULT = 2  # e.g. 12 consecutive rejections ≈ 1 hour at 5-min updates
+REJECT_RUN_LIMIT_DEFAULT = 12  # e.g. 12 consecutive rejections ≈ 1 hour at 5-min updates
 
 
 def _slug(text: str) -> str:
