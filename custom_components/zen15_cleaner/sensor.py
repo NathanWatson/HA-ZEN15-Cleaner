@@ -30,6 +30,7 @@ from .const import (
     DEFAULT_FORWARD_THRESHOLD_KWH,
     DEFAULT_BACKWARD_THRESHOLD_KWH,
 )
+REJECT_RUN_LIMIT_DEFAULT = 12  # e.g. 12 consecutive rejections ≈ 1 hour at 5-min updates
 
 
 def _slug(text: str) -> str:
@@ -210,6 +211,7 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         unique_id: str,
         forward_threshold_kwh: float,
         backward_threshold_kwh: float,
+        reject_run_limit: int = REJECT_RUN_LIMIT_DEFAULT,
     ) -> None:
         self.hass = hass
         self._source = source
@@ -218,6 +220,8 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
 
         self._forward_threshold_kwh = float(forward_threshold_kwh)
         self._backward_threshold_kwh = float(backward_threshold_kwh)
+        self._reject_run_limit = int(reject_run_limit)
+        self._reject_run_count: int = 0
 
         self._raw_entity_id = source.raw_entity_id
         self._native_value: float | None = None
@@ -244,6 +248,8 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
             "last_delta_kwh": self._last_delta_kwh,
             "forward_threshold_kwh": self._forward_threshold_kwh,
             "backward_threshold_kwh": self._backward_threshold_kwh,
+            "reject_run_count": self._reject_run_count,
+            "reject_run_limit": self._reject_run_limit,
         }
 
     async def async_added_to_hass(self) -> None:
@@ -299,11 +305,12 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         except (TypeError, ValueError):
             return
 
-        # First valid value
+        # First valid value: always accept
         if self._native_value is None or self._last_good_value is None:
             self._native_value = raw_value
             self._last_good_value = raw_value
             self._last_delta_kwh = 0.0
+            self._reject_run_count = 0
             self.async_write_ha_state()
             return
 
@@ -311,35 +318,44 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         delta = raw_value - last
         self._last_delta_kwh = delta
 
-        # Backward jumps: never decrease filtered energy
-        if delta < 0:
-            return
-
-        # Forward spikes
-        if delta > self._forward_threshold_kwh:
-            return
-
-        # Normal update
-        self._native_value = raw_value
-        self._last_good_value = raw_value
-        self.async_write_ha_state()
-
-    async def async_reset_filtered(self) -> None:
-        """Align filtered value with current raw kWh sensor."""
-        state = self.hass.states.get(self._raw_entity_id)
-        if state is None or state.state in (
-            STATE_UNAVAILABLE,
-            STATE_UNKNOWN,
-            None,
-            "",
+        # 1) Normal movement within thresholds (including small decreases if allowed)
+        if (
+            -self._backward_threshold_kwh <= delta
+            <= self._forward_threshold_kwh
         ):
-            return
-        try:
-            raw_value = float(state.state)
-        except (TypeError, ValueError):
+            self._native_value = raw_value
+            self._last_good_value = raw_value
+            self._reject_run_count = 0
+            self.async_write_ha_state()
             return
 
-        self._native_value = raw_value
-        self._last_good_value = raw_value
-        self._last_delta_kwh = 0.0
+        # 2) Likely meter reset/rollover:
+        #    big negative jump but new value is small & positive.
+        if (
+            delta < 0
+            and raw_value >= 0
+            and raw_value <= self._forward_threshold_kwh
+        ):
+            # Treat as reset to near-zero
+            self._native_value = raw_value
+            self._last_good_value = raw_value
+            self._reject_run_count = 0
+            self.async_write_ha_state()
+            return
+
+        # 3) Spike outside thresholds → reject for now, but count it
+        self._reject_run_count += 1
+
+        # 4) Self-heal: if we've rejected this many times in a row,
+        #    adopt the new raw value as the baseline.
+        if self._reject_run_count >= self._reject_run_limit:
+            self._native_value = raw_value
+            self._last_good_value = raw_value
+            # keep last_delta_kwh for visibility
+            self._reject_run_count = 0
+            self.async_write_ha_state()
+            return
+
+        # Rejected value; keep current _native_value / _last_good_value
+        # but expose updated delta + reject_run_count via attributes.
         self.async_write_ha_state()
