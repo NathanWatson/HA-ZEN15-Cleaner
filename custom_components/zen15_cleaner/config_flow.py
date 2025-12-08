@@ -5,7 +5,7 @@ from typing import Any, Dict
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -20,24 +20,28 @@ from .const import (
 )
 
 
-def _find_zen15_devices(hass: HomeAssistant):
+def _find_zen15_devices(hass):
     """Return list of (device, display_name) for Zooz ZEN15 devices."""
     dev_reg = dr.async_get(hass)
-    devices = []
+    devices: list[tuple[Any, str]] = []
+
     for dev in dev_reg.devices.values():
         manufacturer = (dev.manufacturer or "").strip()
         model = (dev.model or "").strip()
+
         if manufacturer.lower() != "zooz":
             continue
         if "zen15" not in model.lower():
             continue
+
         name = dev.name or dev.name_by_user or "ZEN15"
         devices.append((dev, name))
+
     return devices
 
 
 def _get_default_options(
-    hass: HomeAssistant, config_entry: config_entries.ConfigEntry | None
+    hass, config_entry: config_entries.ConfigEntry | None
 ) -> dict:
     """Return defaults + any stored options/data."""
     if config_entry is None:
@@ -76,16 +80,18 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
-        """Expose options flow."""
+        """Return the options flow handler."""
         return Zen15CleanerOptionsFlowHandler(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Initial setup step."""
+        # Single instance only
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
+        # User submitted form
         if user_input is not None:
             per_device: Dict[str, float] = {}
             field_map: Dict[str, str] = self._device_field_map
@@ -118,11 +124,11 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data=data,
             )
 
+        # First time: build form
         defaults = _get_default_options(self.hass, None)
         devices = _find_zen15_devices(self.hass)
 
         self._device_field_map: Dict[str, str] = {}
-
         schema_dict: Dict[Any, Any] = {}
 
         # Global thresholds
