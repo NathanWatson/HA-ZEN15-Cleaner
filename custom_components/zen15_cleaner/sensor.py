@@ -29,6 +29,8 @@ from .const import (
     CONF_PER_DEVICE_THRESHOLDS,
     DEFAULT_FORWARD_THRESHOLD_KWH,
     DEFAULT_BACKWARD_THRESHOLD_KWH,
+    CONF_REJECT_RUN_LIMIT,
+    DEFAULT_REJECT_RUN_LIMIT,
 )
 
 
@@ -44,7 +46,6 @@ def _slug(text: str) -> str:
 @dataclass
 class Zen15EnergySource:
     """Represents the raw ZEN15 kWh sensor we wrap."""
-
     device_id: str
     device_name: str | None
     manufacturer: str | None
@@ -52,12 +53,16 @@ class Zen15EnergySource:
     raw_entity_id: str
 
 
+# ---------------------------------------------------------
+# PLATFORM SETUP
+# ---------------------------------------------------------
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ZEN15 cleaned energy sensors from a config entry."""
+    """Set up ZEN15 virtual filtered energy sensors."""
 
     data = entry.data
     opts = entry.options
@@ -75,6 +80,14 @@ async def async_setup_entry(
         )
     )
 
+    # kept only for compatibility
+    global_reject_run_limit = int(
+        opts.get(
+            CONF_REJECT_RUN_LIMIT,
+            data.get(CONF_REJECT_RUN_LIMIT, DEFAULT_REJECT_RUN_LIMIT),
+        )
+    )
+
     per_device: Dict[str, float] = opts.get(
         CONF_PER_DEVICE_THRESHOLDS,
         data.get(CONF_PER_DEVICE_THRESHOLDS, {}),
@@ -85,19 +98,19 @@ async def async_setup_entry(
 
     zen15_sources: List[Zen15EnergySource] = []
 
-    # Collect all ZEN15 devices
+    # Discovery: find every Zooz ZEN15 and its ORIGINAL energy sensor.
     for device in device_reg.devices.values():
         manufacturer = (device.manufacturer or "").strip()
         model = (device.model or "").strip()
 
         if manufacturer.lower() != "zooz":
             continue
-
         if "zen15" not in model.lower():
             continue
 
-        # Find candidate sensor entities for this device
         candidates: list[str] = []
+
+        # Collect ONLY non-integration sensors (the original ZEN15 energy sensors)
         for ent in er.async_entries_for_device(
             entity_reg,
             device.id,
@@ -105,6 +118,11 @@ async def async_setup_entry(
         ):
             if ent.domain != "sensor":
                 continue
+
+            # IMPORTANT: Prevent wrapping our own sensors → avoids infinite filter chains
+            if ent.platform == DOMAIN:
+                continue
+
             candidates.append(ent.entity_id)
 
         raw_entity_id = await _find_energy_entity_for_device(hass, candidates)
@@ -121,17 +139,57 @@ async def async_setup_entry(
             )
         )
 
+    # Build expected filtered sensors BEFORE entity creation
+    expected_sensor_uids = {
+        f"{src.device_id}_energy_filtered" for src in zen15_sources
+    }
+
+    # AUTO-CLEANUP: Remove stale duplicate filtered sensors
+    for ent in list(entity_reg.entities.values()):
+        if ent.platform != DOMAIN:
+            continue
+        if ent.config_entry_id != entry.entry_id:
+            continue
+        if ent.domain != "sensor":
+            continue
+
+        if ent.unique_id not in expected_sensor_uids:
+            # _2, _3, _4, filters-of-filters – nuke them
+            entity_reg.async_remove(ent.entity_id)
+
+    # Clean up old / empty zen15_cleaner devices from earlier versions
+    for device in list(device_reg.devices.values()):
+        # Only touch devices that belong to this config entry
+        if entry.entry_id not in device.config_entries:
+            continue
+
+        # Only touch devices owned by our integration
+        if not any(iden[0] == DOMAIN for iden in device.identifiers):
+            continue
+
+        # Does this device still have any zen15_cleaner entities?
+        ents = er.async_entries_for_device(
+            entity_reg,
+            device.id,
+            include_disabled_entities=True,
+        )
+        has_our_entities = any(ent.platform == DOMAIN for ent in ents)
+
+        if not has_our_entities:
+            # No more entities for this zen15_cleaner device → safe to delete
+            device_reg.async_remove_device(device.id)
+
+    # Create the real filtered sensor entities
     entities: List[SensorEntity] = []
 
     for src in zen15_sources:
         base_name = src.device_name or src.raw_entity_id.split(".")[-1]
-        slug = _slug(base_name or src.raw_entity_id)
 
         forward = per_device.get(src.device_id, global_forward)
         backward = global_backward
 
         name = f"{base_name} Energy Filtered"
-        unique_id = f"{src.device_id}_energy_filtered_{slug}"
+        unique_id = f"{src.device_id}_energy_filtered"  # stable forever
 
         entities.append(
             Zen15CleanedEnergySensor(
@@ -141,17 +199,14 @@ async def async_setup_entry(
                 unique_id=unique_id,
                 forward_threshold_kwh=forward,
                 backward_threshold_kwh=backward,
+                reject_run_limit=global_reject_run_limit,
             )
         )
 
-    if not entities:
-        return
+    if entities:
+        async_add_entities(entities)
 
-    async_add_entities(entities)
-
-    # Register an entity service so you can call:
-    #   service: sensor.reset_filtered
-    #   target:  entity_id: sensor.<name>_energy_filtered
+    # Register our public entity service
     platform = entity_platform.async_get_current_platform()
     platform.async_register_entity_service(
         "reset_filtered",
@@ -160,43 +215,44 @@ async def async_setup_entry(
     )
 
 
+# ---------------------------------------------------------
+# RAW SENSOR PICKER
+# ---------------------------------------------------------
+
 async def _find_energy_entity_for_device(
     hass: HomeAssistant,
     entity_ids: list[str],
 ) -> str | None:
-    """Pick the best candidate raw kWh energy sensor among entity_ids."""
-    best_candidate: str | None = None
+    """Pick the best candidate raw kWh energy sensor."""
+    best = None
 
     for entity_id in entity_ids:
         state = hass.states.get(entity_id)
-        if state is None:
+        if not state:
             continue
 
         attrs = state.attributes
-        dev_class = attrs.get("device_class")
-        unit = attrs.get("unit_of_measurement")
-        state_class = attrs.get("state_class")
 
-        # Must be in kWh
-        if str(unit).lower() not in ("kwh", "kw·h", "kw/h"):
+        if attrs.get("unit_of_measurement", "").lower() not in ("kwh", "kw·h", "kw/h"):
+            continue
+        if attrs.get("device_class") != SensorDeviceClass.ENERGY:
             continue
 
-        # Must be energy
-        if dev_class != SensorDeviceClass.ENERGY:
-            continue
-
-        # Prefer total_increasing
-        if state_class == SensorStateClass.TOTAL_INCREASING:
+        if attrs.get("state_class") == SensorStateClass.TOTAL_INCREASING:
             return entity_id
 
-        if best_candidate is None:
-            best_candidate = entity_id
+        if best is None:
+            best = entity_id
 
-    return best_candidate
+    return best
 
+
+# ---------------------------------------------------------
+# FILTERED VIRTUAL ENERGY SENSOR
+# ---------------------------------------------------------
 
 class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
-    """Filtered energy sensor for a ZEN15 device."""
+    """Zero-based, spike-filtered virtual energy sensor for a ZEN15."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -210,6 +266,7 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         unique_id: str,
         forward_threshold_kwh: float,
         backward_threshold_kwh: float,
+        reject_run_limit: int = DEFAULT_REJECT_RUN_LIMIT,
     ) -> None:
         self.hass = hass
         self._source = source
@@ -219,10 +276,19 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         self._forward_threshold_kwh = float(forward_threshold_kwh)
         self._backward_threshold_kwh = float(backward_threshold_kwh)
 
+        self._reject_run_limit = reject_run_limit  # kept for compatibility
+        self._reject_run_count = 0
+
         self._raw_entity_id = source.raw_entity_id
-        self._native_value: float | None = None
-        self._last_good_value: float | None = None
+
+        self._virtual_total = 0.0
+        self._last_raw_value: float | None = None
         self._last_delta_kwh: float | None = None
+
+        self._reset_detected = False
+        self._spike_ignored = False
+
+        self._native_value: float | None = None
         self._unsub_state = None
 
         self._attr_device_info = DeviceInfo(
@@ -240,106 +306,111 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "raw_entity_id": self._raw_entity_id,
-            "last_good_value": self._last_good_value,
+            "virtual_total_kwh": self._virtual_total,
+            "last_raw_value": self._last_raw_value,
             "last_delta_kwh": self._last_delta_kwh,
             "forward_threshold_kwh": self._forward_threshold_kwh,
             "backward_threshold_kwh": self._backward_threshold_kwh,
+            "reset_detected": self._reset_detected,
+            "spike_ignored": self._spike_ignored,
+            "reject_run_count": self._reject_run_count,
+            "reject_run_limit": self._reject_run_limit,
         }
 
+    # ---------------------------------------------------------
+    # ENTITY LIFECYCLE
+    # ---------------------------------------------------------
+
     async def async_added_to_hass(self) -> None:
-        """Handle entity being added to Home Assistant."""
         await super().async_added_to_hass()
 
-        last_state = await self.async_get_last_state()
-        if last_state and last_state.state not in (
-            STATE_UNAVAILABLE,
-            STATE_UNKNOWN,
-            None,
-            "",
-        ):
+        # Restore last virtual total
+        last = await self.async_get_last_state()
+        if last and last.state not in (None, "", STATE_UNKNOWN, STATE_UNAVAILABLE):
             try:
-                val = float(last_state.state)
+                val = float(last.state)
+                self._virtual_total = val
                 self._native_value = val
-                self._last_good_value = val
-            except (TypeError, ValueError):
+            except Exception:
                 pass
 
-        self._apply_raw_state(self.hass.states.get(self._raw_entity_id))
+            # restore last_raw_value if present
+            lr = last.attributes.get("last_raw_value")
+            if lr is not None:
+                try:
+                    self._last_raw_value = float(lr)
+                except Exception:
+                    pass
+
+        # Prime with current raw reading
+        self._apply_raw_state(self.hass.states.get(self._raw_entity_id), initial=True)
 
         @callback
-        def _state_listener(event):
-            new_state = event.data.get("new_state")
-            self._apply_raw_state(new_state)
+        def _listener(event):
+            self._apply_raw_state(event.data.get("new_state"))
 
         self._unsub_state = async_track_state_change_event(
             self.hass,
             [self._raw_entity_id],
-            _state_listener,
+            _listener,
         )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Handle removal."""
         if self._unsub_state:
             self._unsub_state()
             self._unsub_state = None
 
+    # ---------------------------------------------------------
+    # FILTER LOGIC
+    # ---------------------------------------------------------
+
     @callback
-    def _apply_raw_state(self, state) -> None:
-        """Apply logic to a new raw state from the raw ZEN15 kWh entity."""
-        if state is None or state.state in (
-            STATE_UNAVAILABLE,
-            STATE_UNKNOWN,
-            None,
-            "",
-        ):
+    def _apply_raw_state(self, state, initial: bool = False) -> None:
+        if not state or state.state in (None, "", STATE_UNKNOWN, STATE_UNAVAILABLE):
             return
 
         try:
-            raw_value = float(state.state)
-        except (TypeError, ValueError):
+            raw = float(state.state)
+        except Exception:
             return
 
-        # First valid value
-        if self._native_value is None or self._last_good_value is None:
-            self._native_value = raw_value
-            self._last_good_value = raw_value
+        self._reset_detected = False
+        self._spike_ignored = False
+
+        if self._last_raw_value is None:
+            self._last_raw_value = raw
             self._last_delta_kwh = 0.0
+            self._native_value = self._virtual_total
             self.async_write_ha_state()
             return
 
-        last = self._last_good_value
-        delta = raw_value - last
+        delta = raw - self._last_raw_value
         self._last_delta_kwh = delta
+        delta_clean = 0.0
 
-        # Backward jumps: never decrease filtered energy
-        if delta < 0:
-            return
+        # Big negative jump = reset
+        if delta < -self._backward_threshold_kwh:
+            self._reset_detected = True
+        # Big positive jump = spike
+        elif delta > self._forward_threshold_kwh:
+            self._spike_ignored = True
+        else:
+            if delta > 0:
+                delta_clean = delta
 
-        # Forward spikes
-        if delta > self._forward_threshold_kwh:
-            return
+        if delta_clean > 0:
+            self._virtual_total += delta_clean
 
-        # Normal update
-        self._native_value = raw_value
-        self._last_good_value = raw_value
+        self._native_value = self._virtual_total
+        self._last_raw_value = raw
         self.async_write_ha_state()
 
-    async def async_reset_filtered(self) -> None:
-        """Align filtered value with current raw kWh sensor."""
-        state = self.hass.states.get(self._raw_entity_id)
-        if state is None or state.state in (
-            STATE_UNAVAILABLE,
-            STATE_UNKNOWN,
-            None,
-            "",
-        ):
-            return
-        try:
-            raw_value = float(state.state)
-        except (TypeError, ValueError):
-            return
+    # ---------------------------------------------------------
+    # SERVICE: reset_filtered
+    # ---------------------------------------------------------
 
-        self._native_value = raw_value
-        self._last_good_value = raw_value
-        self._last_delta_kwh = 0.0
+    async def async_reset_filtered(self) -> None:
+        self._virtual_total = 0.0
+        self._native_value = 0.0
+        self._reject_run_count = 0
         self.async_write_ha_state()
