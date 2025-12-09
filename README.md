@@ -1,4 +1,5 @@
-# 🔌 ZEN15 Cleaner – A Home Assistant Spike-Filtering & Self-Healing Integration
+
+# 🔌 ZEN15 Cleaner – A Home Assistant Spike‑Filtering, Virtual Counter & Self‑Healing Integration
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/NathanWatson/HA-ZEN15-Cleaner/main/icons/logo_dark.png" alt="ZEN15 Cleaner Logo" width="600">
@@ -13,143 +14,178 @@
 
 # Overview
 
-**ZEN15 Cleaner** is a Home Assistant custom integration that repairs noisy, spike-prone kWh readings from **ZOOZ ZEN15 Power Switches**.
+**ZEN15 Cleaner** is a Home Assistant integration that fixes noisy, spike‑prone kWh readings from **Zooz ZEN15 Power Switches**, replacing them with a **clean, stable, virtual kWh counter** that is safe for the **Home Assistant Energy Dashboard**.
 
-Many ZEN15 devices occasionally report massive bogus jumps—often thousands of kWh in one update. These spikes pollute the Energy Dashboard and break daily/weekly/monthly statistics.
+Older ZEN15 units often report huge bogus jumps—sometimes thousands of watts or kWh—in a single update. These bad readings pollute energy statistics and produce ridiculous spikes.
 
-This integration creates a *filtered* kWh sensor that:
+The **new v0.8.0 engine** creates a virtual `*_energy_filtered` sensor that:
 
-- Removes bogus spikes  
-- **Self-heals** when a device’s readings shift permanently  
-- Handles meter resets gracefully  
-- Is Energy Dashboard–compatible (`state_class: total_increasing`)  
-- Lets you fine-tune thresholds per device  
+- Uses a **zero‑based virtual counter**  
+- Adds only *valid, positive* measured deltas  
+- Filters out spikes and rollovers  
+- Never adopts bad raw readings  
+- Automatically self‑heals around ZEN15 resets or shifts  
+- Is fully compatible with the Energy Dashboard  
+- Offers per‑device thresholds  
+- Includes a built‑in **Reset Energy Filtered** button  
 
 ---
 
 # 🚀 Features
 
-### ✔ Filters out unrealistic kWh jumps  
-Prevents bad ZEN15 readings from appearing in the Energy Dashboard.
+### ✔ Zero‑based Virtual Energy Counter  
+Never mirrors the ZEN15’s lifetime kWh value.  
+Only adds clean, valid usage increments.
 
-### ✔ Self-healing algorithm  
-If a spike keeps repeating (e.g., after a device firmware reset or behavior change), the sensor eventually accepts the new value as the correct baseline.
+### ✔ Spike & Rollover Filtering  
+Rejects:  
+- Massive positive jumps  
+- Large negative jumps  
+- Temporary glitches  
+- Small negative deltas (treated as zero usage)
 
-### ✔ Per-device tuning  
-Each ZEN15 gets its own configurable spike threshold—handy for devices with unusual power profiles.
+### ✔ Self‑Healing  
+If the plug permanently shifts (e.g., firmware update, Z‑Wave ID reset), the integration recognizes the pattern and stabilizes automatically.
 
-### ✔ Global + per-device configuration flow  
-All settings are configurable in **Settings → Devices & Services → ZEN15 Cleaner → Configure**.
+### ✔ Reset Button  
+Each device gets:
 
-### ✔ Debug visibility  
-Every filtered sensor exposes attributes you can use to diagnose spikes, behavior, self-healing progress, and thresholds.
+```
+Reset Energy Filtered
+```
 
-### ✔ Reset service  
-`sensor.reset_filtered` force-aligns filtered kWh with current raw readings.
+Useful for fresh starts, meter changes, or Energy graph resets.
+
+### ✔ No More Duplicate Devices  
+v0.8.0 includes automatic cleanup of:  
+- `*_energy_filtered_2`, `_3`, `_4` entities  
+- orphaned ZEN15 Cleaner devices  
+
+### ✔ Energy Dashboard Safe  
+The output sensor always increases monotonically and never spikes.
 
 ---
 
 # 📦 Installation
 
-1. Place the integration here:
+### Via HACS (recommended)
+
+1. Open **HACS → Integrations → Custom repositories**
+2. Add: `https://github.com/NathanWatson/HA-ZEN15-Cleaner`
+3. Category: **Integration**
+4. Install and restart Home Assistant.
+
+### Manual Installation
+
+Copy this folder:
 
 ```
 custom_components/zen15_cleaner/
 ```
 
-2. Restart Home Assistant  
-3. Go to **Settings → Devices & Services → Add Integration → ZEN15 Cleaner**
+Then restart Home Assistant.
 
 ---
 
 # 🔧 Configuration
 
-During setup and in the Options flow, you can configure:
+Go to:
 
-### **Global Forward Threshold (kWh)**
-Maximum allowed increase per update before a reading is considered a spike.
+**Settings → Devices & Services → ZEN15 Cleaner → Configure**
 
-### **Global Backward Threshold (kWh)**
-Displayed for debugging; filtered energy never decreases.
+### Available Options
 
-### **Reject Run Limit (Self-Heal Timer)**
-How many *consecutive rejected spikes* must occur before the filter decides:
+#### **Global Forward Threshold (kWh)**
+Max allowed increase per update before considered a spike.
 
-> “This isn’t a spike anymore — this is the new baseline.”
+#### **Global Backward Threshold (kWh)**
+Displayed for diagnostics; filtered energy never decreases.
 
-Example:  
-If set to 12, and readings keep jumping by +2400 kWh each time, after 12 rejections the filter **auto-adopts** the new value.
+#### **Per‑Device Threshold Overrides**
+Each discovered ZEN15 shows up with a friendly device name.
 
-### **Per-Device Forward Threshold Overrides**
-Each detected ZEN15 appears with a friendly name like:
+Example:
 
-> Furnace ZEN15 (device_id)
+> Dishwasher ZEN15  
+> Fridge ZEN15  
+> Furnace ZEN15
 
-You can specify a threshold just for that device.
+You may override forward spike thresholds individually.
 
 ---
 
-# ⚙️ Filtering & Self-Healing Logic
+# 🧠 How the Virtual Counter Works
 
 Let:
 
-- `raw` = incoming ZEN15 kWh value  
-- `filtered` = output of ZEN15 Cleaner  
-- `last_good_value` = most recently accepted reading  
-- `delta = raw - last_good_value`  
+- `raw` = Zooz kWh reading  
+- `virt` = virtual filtered reading  
+- `last_raw` = previous raw reading  
+- `delta = raw - last_raw`  
 
-### 🛑 1. Reject backward movement
-Energy never decreases. Any negative deltas are ignored unless part of a meter reset.
+### 1. First raw reading  
+The integration stores it but **does not** add anything to the virtual total.
 
-### ⚠️ 2. Reject spikes  
-If `delta > forward_threshold_kwh`, the value is ignored *temporarily*.
+### 2. Valid Positive Deltas  
+If `0 < delta ≤ threshold` → added to virtual total.
 
-### 🔄 3. Self-healing  
-If the *same type of spike* happens repeatedly, and the number of rejections reaches `reject_run_limit`:
+### 3. Negative Deltas  
+Ignored, unless part of a detected ZEN15 meter reset.
 
-→ The filter **accepts the raw value as the new baseline**  
-→ `reject_run_count` resets to 0  
+### 4. Spikes  
+If `delta > forward_threshold` → ignored, but logged in attributes.
 
-This prevents the sensor from becoming “stuck” forever after a large permanent shift.
+### 5. Self‑Healing  
+If Home Assistant sees many consecutive "spikes":
 
-### 🔁 4. Meter Reset Detection  
-If kWh suddenly drops near zero and stays there, the filter assumes the meter reset and adopts the new baseline immediately.
+```
+reject_run_count >= reject_run_limit
+```
+
+→ The new raw reading becomes the new baseline (but does NOT jump virtual energy).
+
+### 6. Meter Reset Detection  
+If the ZEN15 drops near zero and stays there, the virtual counter resets its baseline silently.
 
 ---
 
-# 🧪 Reset Filtered Service
+# 🧪 Reset Function
 
-If a ZEN15 resets or you want to realign filtered output:
+Call the built‑in service:
 
 ```yaml
-service: sensor.reset_filtered
+service: zen15_cleaner.reset_filtered
 target:
-  entity_id: sensor.furnace_energy_filtered
+  entity_id: sensor.<device>_energy_filtered
 ```
 
-This updates the filtered value without breaking long-term statistics.
+Equivalent to pressing the reset button under the device card.
+
+This sets:
+
+- `virtual_total = 0`
+- next delta starts fresh from the current ZEN15 raw reading
 
 ---
 
 # 📊 Sensor Attributes
 
-Each `*_energy_filtered` sensor exposes:
-
-| Attribute | Description |
-|----------|-------------|
-| `raw_entity_id` | The source ZEN15 kWh sensor |
-| `last_good_value` | Most recently accepted (filtered) kWh value |
-| `last_delta_kwh` | Difference between raw and last good value |
-| `forward_threshold_kwh` | Current threshold for this device |
-| `backward_threshold_kwh` | Backward delta block threshold |
-| `reject_run_count` | How many spike rejections have occurred in a row |
-| `reject_run_limit` | How many rejections must occur before auto-heal |
-
-Useful for diagnosing stuck readings, tuning thresholds, and verifying self-healing.
+| Attribute | Meaning |
+|----------|---------|
+| `raw_entity_id` | Source ZEN15 kWh sensor |
+| `virtual_total_kwh` | Current virtual usage total |
+| `last_raw_value` | Last raw reading observed |
+| `last_delta_kwh` | Difference from last raw reading |
+| `reset_detected` | True if a rollover/reset occurred |
+| `spike_ignored` | True if this reading was a spike |
+| `forward_threshold_kwh` | Allowed positive jump |
+| `backward_threshold_kwh` | Allowed negative jump (usually 0) |
+| `reject_run_count` | Spike rejections since last heal |
+| `reject_run_limit` | Rejections required before adopting a new baseline |
 
 ---
 
-# 📝 Example Lovelace Card
+# 🧭 Example Lovelace Card
 
 ```yaml
 type: entities
@@ -158,29 +194,47 @@ entities:
   - sensor.fridge_energy_filtered
   - sensor.dishwasher_energy_filtered
   - sensor.furnace_energy_filtered
-  - sensor.washing_machine_energy_filtered
 ```
+
+---
+
+# 🔄 Migration: v0.7.6 → v0.8.0
+
+### 🆕 New Virtual Counter  
+The old behavior mirrored the ZEN15’s lifetime kWh and filtered spikes.  
+The new version **no longer follows raw values at all**.
+
+### 🧹 Automatic Cleanup  
+v0.8.0 auto‑removes all:  
+- stale filtered sensors  
+- `_2`, `_3`, `_4` duplicates  
+- orphan devices in the registry  
+
+### 🔘 Buttons Added  
+Each ZEN15 now gets a reset button paired with the filtered sensor.
+
+### 🤝 Energy Dashboard Safe  
+No more megawatt spikes or broken graphs.
 
 ---
 
 # 🐛 Troubleshooting
 
-### Filtered sensor stuck at one value?
-Check attributes:
+### Filtered sensor not increasing?
+Check attributes:  
+- `spike_ignored: true`  
+- `last_delta_kwh` huge  
+→ It's filtering correctly.
 
-- `last_delta_kwh` might be huge  
-- `reject_run_count` increments each update  
+### Virtual counter too low?
+Press **Reset Energy Filtered** to restart at zero.
 
-Once `reject_run_count == reject_run_limit`, the sensor will auto-heal.
+### Device missing?
+Ensure the ZEN15 appears under Z‑Wave with manufacturer `"Zooz"` and model containing `"ZEN15"`.
 
-### Device missing from Options?
-Ensure the ZEN15 shows in:
-**Integrations → ZWave**  
-Manufacturer must be `"ZOOZ"` and model must include `"ZEN15"`.
+---
 
-### Need to force a reset?
-Use:
+# ❤️ Contributing
 
-```yaml
-service: sensor.reset_filtered
-```
+Pull requests welcome!  
+https://github.com/NathanWatson/HA-ZEN15-Cleaner
