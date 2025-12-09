@@ -76,6 +76,7 @@ async def async_setup_entry(
             data.get(CONF_BACKWARD_THRESHOLD_KWH, DEFAULT_BACKWARD_THRESHOLD_KWH),
         )
     )
+    # Kept for compatibility, but not used in the new model for self-heal runs.
     global_reject_run_limit = int(
         opts.get(
             CONF_REJECT_RUN_LIMIT,
@@ -205,7 +206,13 @@ async def _find_energy_entity_for_device(
 
 
 class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
-    """Filtered energy sensor for a ZEN15 device."""
+    """
+    Zero-based, spike-filtered virtual energy sensor for a ZEN15 device.
+
+    - Starts at 0 on first install.
+    - Only adds sane, positive deltas from the raw ZEN15 kWh sensor.
+    - Ignores negative jumps (resets/rollovers) and big spikes beyond thresholds.
+    """
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -226,16 +233,29 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         self._attr_name = name
         self._attr_unique_id = unique_id
 
+        # Thresholds are per-step delta limits
         self._forward_threshold_kwh = float(forward_threshold_kwh)
         self._backward_threshold_kwh = float(backward_threshold_kwh)
+
+        # Kept for schema compatibility; not used in delta logic anymore
         self._reject_run_limit = int(reject_run_limit)
         self._reject_run_count: int = 0
 
         self._raw_entity_id = source.raw_entity_id
-        self._native_value: float | None = None
-        self._last_good_value: float | None = None
+
+        # Virtual counter & raw tracking
+        self._virtual_total: float = 0.0  # our zero-based total
+        self._last_raw_value: float | None = None
         self._last_delta_kwh: float | None = None
+
+        # Diagnostics
+        self._reset_detected: bool = False
+        self._spike_ignored: bool = False
+
         self._unsub_state = None
+
+        # What HA sees as the sensor state
+        self._native_value: float | None = None
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, source.device_id)},
@@ -252,10 +272,14 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "raw_entity_id": self._raw_entity_id,
-            "last_good_value": self._last_good_value,
+            "virtual_total_kwh": self._virtual_total,
+            "last_raw_value": self._last_raw_value,
             "last_delta_kwh": self._last_delta_kwh,
             "forward_threshold_kwh": self._forward_threshold_kwh,
             "backward_threshold_kwh": self._backward_threshold_kwh,
+            "reset_detected": self._reset_detected,
+            "spike_ignored": self._spike_ignored,
+            # kept for backwards compatibility / visibility
             "reject_run_count": self._reject_run_count,
             "reject_run_limit": self._reject_run_limit,
         }
@@ -264,6 +288,7 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         """Handle entity being added to Home Assistant."""
         await super().async_added_to_hass()
 
+        # Restore our virtual total from last state if available
         last_state = await self.async_get_last_state()
         if last_state and last_state.state not in (
             STATE_UNAVAILABLE,
@@ -273,12 +298,21 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         ):
             try:
                 val = float(last_state.state)
+                self._virtual_total = val
                 self._native_value = val
-                self._last_good_value = val
             except (TypeError, ValueError):
                 pass
 
-        self._apply_raw_state(self.hass.states.get(self._raw_entity_id))
+            # Restore last_raw_value from attributes if present
+            last_raw = last_state.attributes.get("last_raw_value")
+            if last_raw is not None:
+                try:
+                    self._last_raw_value = float(last_raw)
+                except (TypeError, ValueError):
+                    pass
+
+        # Apply current raw state once on startup
+        self._apply_raw_state(self.hass.states.get(self._raw_entity_id), initial=True)
 
         @callback
         def _state_listener(event):
@@ -298,8 +332,17 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
             self._unsub_state = None
 
     @callback
-    def _apply_raw_state(self, state) -> None:
-        """Apply logic to a new raw state from the raw ZEN15 kWh entity."""
+    def _apply_raw_state(self, state, initial: bool = False) -> None:
+        """
+        Handle a new raw state from the ZEN15 kWh entity.
+
+        We do NOT mirror the raw value. Instead we:
+        - Track the last raw reading.
+        - Compute delta = raw_now - last_raw.
+        - If delta is a sane, positive value within thresholds → add to our virtual total.
+        - If delta is negative beyond backward_threshold → treat as reset and add nothing.
+        - If delta is positive but above forward_threshold → treat as spike and add nothing.
+        """
         if state is None or state.state in (
             STATE_UNAVAILABLE,
             STATE_UNKNOWN,
@@ -313,57 +356,67 @@ class Zen15CleanedEnergySensor(RestoreEntity, SensorEntity):
         except (TypeError, ValueError):
             return
 
-        # First valid value: always accept
-        if self._native_value is None or self._last_good_value is None:
-            self._native_value = raw_value
-            self._last_good_value = raw_value
+        # Reset diagnostics each cycle
+        self._reset_detected = False
+        self._spike_ignored = False
+
+        # First valid raw value: just store it, do NOT change the virtual total.
+        if self._last_raw_value is None:
+            self._last_raw_value = raw_value
             self._last_delta_kwh = 0.0
-            self._reject_run_count = 0
+            # For a brand-new install, _virtual_total starts at 0.
+            # For restored entities, _virtual_total is whatever we restored.
+            self._native_value = self._virtual_total
             self.async_write_ha_state()
             return
 
-        last = self._last_good_value
-        delta = raw_value - last
+        # Compute raw delta
+        delta = raw_value - self._last_raw_value
         self._last_delta_kwh = delta
 
-        # 1) Normal movement within thresholds (including small decreases if allowed)
-        if (
-            -self._backward_threshold_kwh <= delta
-            <= self._forward_threshold_kwh
-        ):
-            self._native_value = raw_value
-            self._last_good_value = raw_value
-            self._reject_run_count = 0
-            self.async_write_ha_state()
-            return
+        # Decide what to do with this delta
+        delta_clean = 0.0
 
-        # 2) Likely meter reset/rollover:
-        #    big negative jump but new value is small & positive.
-        if (
-            delta < 0
-            and raw_value >= 0
-            and raw_value <= self._forward_threshold_kwh
-        ):
-            # Treat as reset to near-zero
-            self._native_value = raw_value
-            self._last_good_value = raw_value
-            self._reject_run_count = 0
-            self.async_write_ha_state()
-            return
+        # 1) Big negative jump -> treat as reset/rollover; don't add anything
+        if delta < -self._backward_threshold_kwh:
+            self._reset_detected = True
+            delta_clean = 0.0
 
-        # 3) Spike outside thresholds → reject for now, but count it
-        self._reject_run_count += 1
+        # 2) Big positive jump -> treat as spike; don't add anything
+        elif delta > self._forward_threshold_kwh:
+            self._spike_ignored = True
+            delta_clean = 0.0
 
-        # 4) Self-heal: if we've rejected this many times in a row,
-        #    adopt the new raw value as the baseline.
-        if self._reject_run_count >= self._reject_run_limit:
-            self._native_value = raw_value
-            self._last_good_value = raw_value
-            # keep last_delta_kwh for visibility
-            self._reject_run_count = 0
-            self.async_write_ha_state()
-            return
+        # 3) Delta within thresholds:
+        else:
+            # Don't subtract on small negative deltas; just treat as 0 usage
+            if delta > 0:
+                delta_clean = delta
+            else:
+                delta_clean = 0.0
 
-        # Rejected value; keep current _native_value / _last_good_value
-        # but expose updated delta + reject_run_count via attributes.
+        # Apply clean delta to our virtual total
+        if delta_clean > 0:
+            self._virtual_total += delta_clean
+
+        # Expose our virtual total as the sensor state
+        self._native_value = self._virtual_total
+
+        # Update raw tracker and push state
+        self._last_raw_value = raw_value
+        self.async_write_ha_state()
+
+    async def async_reset_filtered(self) -> None:
+        """
+        Reset our virtual total to 0 for this entity.
+
+        IMPORTANT:
+        - We do NOT reset _last_raw_value, so the next delta will be computed
+          from the current raw reading forward (no replay of historical usage).
+        - You probably want to pair this with a statistics purge for the
+          corresponding entity in HA's Energy DB if you care about history.
+        """
+        self._virtual_total = 0.0
+        self._native_value = 0.0
+        self._reject_run_count = 0
         self.async_write_ha_state()
