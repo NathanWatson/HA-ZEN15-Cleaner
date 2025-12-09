@@ -139,45 +139,6 @@ async def async_setup_entry(
             )
         )
 
-    # Build expected filtered sensors BEFORE entity creation
-    expected_sensor_uids = {
-        f"{src.device_id}_energy_filtered" for src in zen15_sources
-    }
-
-    # AUTO-CLEANUP: Remove stale duplicate filtered sensors
-    for ent in list(entity_reg.entities.values()):
-        if ent.platform != DOMAIN:
-            continue
-        if ent.config_entry_id != entry.entry_id:
-            continue
-        if ent.domain != "sensor":
-            continue
-
-        if ent.unique_id not in expected_sensor_uids:
-            # _2, _3, _4, filters-of-filters – nuke them
-            entity_reg.async_remove(ent.entity_id)
-
-    # Clean up old / empty zen15_cleaner devices from earlier versions
-    for device in list(device_reg.devices.values()):
-        # Only touch devices that belong to this config entry
-        if entry.entry_id not in device.config_entries:
-            continue
-
-        # Only touch devices owned by our integration
-        if not any(iden[0] == DOMAIN for iden in device.identifiers):
-            continue
-
-        # Does this device still have any zen15_cleaner entities?
-        ents = er.async_entries_for_device(
-            entity_reg,
-            device.id,
-            include_disabled_entities=True,
-        )
-        has_our_entities = any(ent.platform == DOMAIN for ent in ents)
-
-        if not has_our_entities:
-            # No more entities for this zen15_cleaner device → safe to delete
-            device_reg.async_remove_device(device.id)
 
     # Create the real filtered sensor entities
     entities: List[SensorEntity] = []
