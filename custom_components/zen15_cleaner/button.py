@@ -47,12 +47,9 @@ async def async_setup_entry(
         if "zen15" not in model.lower():
             continue
 
-        base_name = device.name or device.name_by_user or ""
-        slug = _slug(base_name or "zen15")
-
         # Our filtered sensor unique_id in sensor.py:
-        # unique_id = f"{source.device_id}_energy_filtered_{slug}"
-        unique_id = f"{device.id}_energy_filtered_{slug}"
+        # unique_id = f"{source.device_id}_energy_filtered"
+        unique_id = f"{device.id}_energy_filtered"
 
         filtered_entity_id = entity_reg.async_get_entity_id(
             "sensor",  # domain

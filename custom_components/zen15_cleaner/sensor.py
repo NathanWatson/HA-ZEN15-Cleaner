@@ -134,13 +134,13 @@ async def async_setup_entry(
 
     for src in zen15_sources:
         base_name = src.device_name or src.raw_entity_id.split(".")[-1]
-        slug = _slug(base_name or src.raw_entity_id)
 
         forward = per_device.get(src.device_id, global_forward)
         backward = global_backward
 
         name = f"{base_name} Energy Filtered"
-        unique_id = f"{src.device_id}_energy_filtered_{slug}"
+        # Stable per ZEN15 device, does NOT depend on names
+        unique_id = f"{src.device_id}_energy_filtered"
 
         entities.append(
             Zen15CleanedEnergySensor(
