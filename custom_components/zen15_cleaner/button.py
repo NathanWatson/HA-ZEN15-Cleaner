@@ -11,7 +11,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN
-from .sensor import _slug  # reuse the same slug logic as sensor.py
 
 
 @dataclass
@@ -37,7 +36,7 @@ async def async_setup_entry(
 
     targets: List[Zen15ResetTarget] = []
 
-    # Discover all Zooz ZEN15 *Zooz* devices (same as sensor.py)
+    # Discover all Zooz ZEN15 devices
     for device in device_reg.devices.values():
         manufacturer = (device.manufacturer or "").strip()
         model = (device.model or "").strip()
@@ -48,15 +47,14 @@ async def async_setup_entry(
             continue
 
         # Our filtered sensor unique_id in sensor.py:
-        # unique_id = f"{source.device_id}_energy_filtered"
-        unique_id = f"{device.id}_energy_filtered"
+        #   unique_id = f"{device.id}_energy_filtered"
+        sensor_uid = f"{device.id}_energy_filtered"
 
         filtered_entity_id = entity_reg.async_get_entity_id(
-            "sensor",  # domain
-            DOMAIN,    # platform
-            unique_id,
+            "sensor",   # domain
+            DOMAIN,     # platform
+            sensor_uid, # unique_id
         )
-
         if not filtered_entity_id:
             # Filtered sensor for this device not found (maybe not created yet)
             continue
@@ -70,6 +68,25 @@ async def async_setup_entry(
                 filtered_entity_id=filtered_entity_id,
             )
         )
+
+    # Build the set of button unique_ids we actually expect
+    expected_button_uids = {
+        f"{entry.entry_id}_{t.zooz_device_id}_reset_energy_filtered"
+        for t in targets
+    }
+
+    # Clean up old / duplicate button entities from this integration
+    for ent in list(entity_reg.entities.values()):
+        if ent.platform != DOMAIN:
+            continue
+        if ent.config_entry_id != entry.entry_id:
+            continue
+        if ent.domain != "button":
+            continue
+
+        if ent.unique_id not in expected_button_uids:
+            # Stale / duplicate reset button – remove it
+            entity_reg.async_remove(ent.entity_id)
 
     if not targets:
         return
@@ -106,7 +123,9 @@ class Zen15ResetButton(ButtonEntity):
         self._attr_name = f"{base_name} Reset Energy Filtered"
 
         # One button per Zooz device
-        self._attr_unique_id = f"{entry_id}_{target.zooz_device_id}_reset_energy_filtered"
+        self._attr_unique_id = (
+            f"{entry_id}_{target.zooz_device_id}_reset_energy_filtered"
+        )
 
         # IMPORTANT: identifiers match sensor.py: (DOMAIN, zooz_device_id)
         self._attr_device_info = DeviceInfo(
