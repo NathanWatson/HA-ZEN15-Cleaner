@@ -114,6 +114,9 @@ async def async_setup_entry(
         ):
             if ent.domain != "sensor":
                 continue
+            # IMPORTANT: don't consider our own filtered sensors
+            if ent.platform == DOMAIN:
+                continue
             candidates.append(ent.entity_id)
 
         raw_entity_id = await _find_energy_entity_for_device(hass, candidates)
