@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.const import ENTITY_CATEGORY_CONFIG
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers import entity_registry as er, device_registry as dr
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN
 from .sensor import (
-    Zen15EnergySource,
     _find_energy_entity_for_device,
     _slug,
 )
@@ -111,7 +109,7 @@ async def async_setup_entry(
 class Zen15ResetButton(ButtonEntity):
     """Button to reset the ZEN15 Cleaner virtual energy counter."""
 
-    _attr_entity_category = ENTITY_CATEGORY_CONFIG
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
