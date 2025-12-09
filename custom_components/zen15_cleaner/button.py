@@ -11,16 +11,18 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN
+from .sensor import _slug  # reuse the same slug logic as sensor.py
 
 
 @dataclass
 class Zen15ResetTarget:
     """Represents the reset button target (the filtered sensor) for a ZEN15."""
-    device_id: str
+
+    zooz_device_id: str           # original Zooz device.id (same as in sensor.py)
     device_name: str | None
     manufacturer: str | None
     model: str | None
-    filtered_entity_id: str
+    filtered_entity_id: str       # actual entity_id of the Energy Filtered sensor
 
 
 async def async_setup_entry(
@@ -35,7 +37,7 @@ async def async_setup_entry(
 
     targets: List[Zen15ResetTarget] = []
 
-    # Discover all ZEN15 devices
+    # Discover all Zooz ZEN15 *Zooz* devices (same as sensor.py)
     for device in device_reg.devices.values():
         manufacturer = (device.manufacturer or "").strip()
         model = (device.model or "").strip()
@@ -45,26 +47,32 @@ async def async_setup_entry(
         if "zen15" not in model.lower():
             continue
 
-        # Find our filtered sensors for this device (platform == DOMAIN)
-        for ent in er.async_entries_for_device(
-            entity_reg,
-            device.id,
-            include_disabled_entities=False,
-        ):
-            if ent.domain != "sensor":
-                continue
-            if ent.platform != DOMAIN:
-                continue
+        base_name = device.name or device.name_by_user or ""
+        slug = _slug(base_name or "zen15")
 
-            targets.append(
-                Zen15ResetTarget(
-                    device_id=device.id,
-                    device_name=device.name or device.name_by_user,
-                    manufacturer=manufacturer,
-                    model=model,
-                    filtered_entity_id=ent.entity_id,
-                )
+        # Our filtered sensor unique_id in sensor.py:
+        # unique_id = f"{source.device_id}_energy_filtered_{slug}"
+        unique_id = f"{device.id}_energy_filtered_{slug}"
+
+        filtered_entity_id = entity_reg.async_get_entity_id(
+            "sensor",  # domain
+            DOMAIN,    # platform
+            unique_id,
+        )
+
+        if not filtered_entity_id:
+            # Filtered sensor for this device not found (maybe not created yet)
+            continue
+
+        targets.append(
+            Zen15ResetTarget(
+                zooz_device_id=device.id,
+                device_name=device.name or device.name_by_user,
+                manufacturer=manufacturer,
+                model=model,
+                filtered_entity_id=filtered_entity_id,
             )
+        )
 
     if not targets:
         return
@@ -99,10 +107,13 @@ class Zen15ResetButton(ButtonEntity):
 
         base_name = target.device_name or target.filtered_entity_id.split(".")[-1]
         self._attr_name = f"{base_name} Reset Energy Filtered"
-        self._attr_unique_id = f"{entry_id}_{target.device_id}_{target.filtered_entity_id}_reset_energy_filtered"
 
+        # One button per Zooz device
+        self._attr_unique_id = f"{entry_id}_{target.zooz_device_id}_reset_energy_filtered"
+
+        # IMPORTANT: identifiers match sensor.py: (DOMAIN, zooz_device_id)
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, target.device_id)},
+            identifiers={(DOMAIN, target.zooz_device_id)},
             manufacturer=target.manufacturer,
             model=target.model,
             name=target.device_name,
@@ -110,7 +121,7 @@ class Zen15ResetButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        # Call the zen15_cleaner.reset_filtered entity service for this sensor
+        # Call our integration's entity service for this filtered sensor
         await self.hass.services.async_call(
             DOMAIN,
             "reset_filtered",
