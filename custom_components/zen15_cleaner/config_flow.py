@@ -92,14 +92,12 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for ZEN15 Cleaner."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+        super().__init__()
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
-        return await self.async_step_user(user_input)
-
-    async def async_step_user(self, user_input=None):
         errors: Dict[str, str] = {}
-        entry = self.config_entry
+        entry = self._config_entry
         hass: HomeAssistant = self.hass  # type: ignore[assignment]
 
         # ----- Current values / defaults -----
@@ -109,9 +107,7 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
         )
         backward_default = entry.options.get(
             CONF_BACKWARD_THRESHOLD_KWH,
-            entry.data.get(
-                CONF_BACKWARD_THRESHOLD_KWH, DEFAULT_BACKWARD_THRESHOLD_KWH
-            ),
+            entry.data.get(CONF_BACKWARD_THRESHOLD_KWH, DEFAULT_BACKWARD_THRESHOLD_KWH),
         )
         reject_default = entry.options.get(
             CONF_REJECT_RUN_LIMIT,
@@ -145,7 +141,6 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
                         if dev_id in per_device_existing:
                             per_device_new[dev_id] = per_device_existing[dev_id]
 
-            # Create options entry; HA replaces options with this dict
             return self.async_create_entry(
                 title="",
                 data={
@@ -178,24 +173,15 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
         }
 
-        # One numeric field per ZEN15 device, keyed by device_id
-        # The label shown will be the device_id; value is the forward-threshold override.
         for device in zen15_devices:
             label = _zen15_label(device)
             dev_id = device.id
             default = per_device_existing.get(dev_id, forward_default)
 
-            fields[
-                vol.Optional(
-                    label,
-                    default=default,
-                )
-            ] = vol.Coerce(float)
-
-        data_schema = vol.Schema(fields)
+            fields[vol.Optional(label, default=default)] = vol.Coerce(float)
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=data_schema,
+            step_id="init",
+            data_schema=vol.Schema(fields),
             errors=errors,
         )
