@@ -45,7 +45,7 @@ def _slug(text: str) -> str:
 
 @dataclass
 class Zen15EnergySource:
-    """Represents the raw ZEN15 kWh sensor we wrap."""
+    """Represents the raw ZEN15/ZEN04 kWh sensor we wrap."""
     device_id: str
     device_name: str | None
     manufacturer: str | None
@@ -62,7 +62,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ZEN15 virtual filtered energy sensors."""
+    """Set up ZEN15/ZEN04 virtual filtered energy sensors."""
 
     data = entry.data
     opts = entry.options
@@ -98,19 +98,19 @@ async def async_setup_entry(
 
     zen15_sources: List[Zen15EnergySource] = []
 
-    # Discovery: find every Zooz ZEN15 and its ORIGINAL energy sensor.
+    # Discovery: find every Zooz ZEN15/ZEN04 and its ORIGINAL energy sensor.
     for device in device_reg.devices.values():
         manufacturer = (device.manufacturer or "").strip()
         model = (device.model or "").strip()
 
         if manufacturer.lower() != "zooz":
             continue
-        if "zen15" not in model.lower():
+        if "zen15" not in model.lower() and "zen04" not in model.lower():
             continue
 
         candidates: list[str] = []
 
-        # Collect ONLY non-integration sensors (the original ZEN15 energy sensors)
+        # Collect ONLY non-integration sensors (the original ZEN15/ZEN04 energy sensors)
         for ent in er.async_entries_for_device(
             entity_reg,
             device.id,

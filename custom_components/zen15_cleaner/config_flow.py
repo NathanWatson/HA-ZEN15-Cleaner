@@ -19,20 +19,19 @@ from .const import (
     DEFAULT_REJECT_RUN_LIMIT,
 )
 
-
 def _is_zen15_device(device: dr.DeviceEntry) -> bool:
-    """Return True if this device looks like a Zooz ZEN15."""
+    """Return True if this device looks like a Zooz ZEN15 or ZEN04."""
     manufacturer = (device.manufacturer or "").strip().lower()
     model = (device.model or "").strip().lower()
-    return manufacturer == "zooz" and "zen15" in model
+    return manufacturer == "zooz" and ("zen15" in model or "zen04" in model)
 
 def _zen15_label(device: dr.DeviceEntry) -> str:
     """Human-readable label for options form."""
-    base = device.name_by_user or device.name or "ZEN15"
+    base = device.name_by_user or device.name or "Zooz Device"
     return f"{base} ({device.id})"
 
 class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for ZEN15 Cleaner."""
+    """Handle a config flow for ZEN15/ZEN04 Cleaner."""
 
     VERSION = 1
 
@@ -42,7 +41,7 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Create a single config entry; we store global defaults in data.
             return self.async_create_entry(
-                title="ZEN15 Cleaner",
+                title="Zooz Cleaner",
                 data={
                     CONF_FORWARD_THRESHOLD_KWH: user_input.get(
                         CONF_FORWARD_THRESHOLD_KWH, DEFAULT_FORWARD_THRESHOLD_KWH
@@ -89,7 +88,7 @@ class Zen15CleanerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for ZEN15 Cleaner."""
+    """Handle options for ZEN15/ZEN04 Cleaner."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         super().__init__()
@@ -119,7 +118,7 @@ class Zen15CleanerOptionsFlowHandler(config_entries.OptionsFlow):
             entry.data.get(CONF_PER_DEVICE_THRESHOLDS, {}),
         )
 
-        # Discover current ZEN15 devices so we can build per-device fields
+        # Discover current ZEN15/ZEN04 devices so we can build per-device fields
         device_reg = dr.async_get(hass)
         zen15_devices: List[dr.DeviceEntry] = [
             dev for dev in device_reg.devices.values() if _is_zen15_device(dev)
