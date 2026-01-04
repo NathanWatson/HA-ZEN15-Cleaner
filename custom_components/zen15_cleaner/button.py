@@ -15,7 +15,7 @@ from .const import DOMAIN
 
 @dataclass
 class Zen15ResetTarget:
-    """Represents the reset button target (the filtered sensor) for a ZEN15."""
+    """Represents the reset button target (the filtered sensor) for a ZEN15/ZEN04."""
 
     zooz_device_id: str           # original Zooz device.id (same as in sensor.py)
     device_name: str | None
@@ -29,21 +29,21 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up reset buttons for ZEN15 Cleaner."""
+    """Set up reset buttons for ZEN15/ZEN04 Cleaner."""
 
     entity_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
 
     targets: List[Zen15ResetTarget] = []
 
-    # Discover all Zooz ZEN15 devices
+    # Discover all Zooz ZEN15/ZEN04 devices
     for device in device_reg.devices.values():
         manufacturer = (device.manufacturer or "").strip()
         model = (device.model or "").strip()
 
         if manufacturer.lower() != "zooz":
             continue
-        if "zen15" not in model.lower():
+        if "zen15" not in model.lower() and "zen04" not in model.lower():
             continue
 
         # Our filtered sensor unique_id in sensor.py:
