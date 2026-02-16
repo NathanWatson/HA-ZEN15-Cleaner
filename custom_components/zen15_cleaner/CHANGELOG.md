@@ -1,5 +1,7 @@
 # ZEN15 Cleaner – Changelog
 
+## 0.8.4 - Added Zen04 Support
+
 ## 0.8.0 — Virtual Counter & Self-Healing Release
 
 ### Added
