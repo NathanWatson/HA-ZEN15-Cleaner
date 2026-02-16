@@ -1,5 +1,5 @@
 
-# 🔌 ZEN15 Cleaner – A Home Assistant Spike‑Filtering, Virtual Counter & Self‑Healing Integration
+# 🔌 ZEN15/ZEN04 Cleaner – A Home Assistant Spike‑Filtering, Virtual Counter & Self‑Healing Integration
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/NathanWatson/HA-ZEN15-Cleaner/main/icons/logo_dark.png" alt="ZEN15 Cleaner Logo" width="600">
@@ -14,9 +14,9 @@
 
 # Overview
 
-**ZEN15 Cleaner** is a Home Assistant integration that fixes noisy, spike‑prone kWh readings from **Zooz ZEN15 Power Switches**, replacing them with a **clean, stable, virtual kWh counter** that is safe for the **Home Assistant Energy Dashboard**.
+**ZEN15 Cleaner** is a Home Assistant integration that fixes noisy, spike‑prone kWh readings from **Zooz ZEN15 Power Switches** and **ZEN04 Smart Plugs**, replacing them with a **clean, stable, virtual kWh counter** that is safe for the **Home Assistant Energy Dashboard**.
 
-Older ZEN15 units often report huge bogus jumps—sometimes thousands of watts or kWh—in a single update. These bad readings pollute energy statistics and produce ridiculous spikes.
+Older ZEN15 and ZEN04 units often report huge bogus jumps—sometimes thousands of watts or kWh—in a single update. These bad readings pollute energy statistics and produce ridiculous spikes.
 
 The **new v0.8.0 engine** creates a virtual `*_energy_filtered` sensor that:
 

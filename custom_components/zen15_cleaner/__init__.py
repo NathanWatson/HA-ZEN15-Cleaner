@@ -10,7 +10,7 @@ PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up ZEN15 Cleaner from a config entry."""
+    """Set up ZEN15/ZEN04 Cleaner from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
